@@ -23,11 +23,15 @@ app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
 
 setupSocket(io);
 
-const cleanupInterval = setInterval(() => roomService.cleanup(), 60_000);
-const timeoutInterval = setInterval(() => roomService.checkTimeouts(io), 500);
+const cleanupInterval = setInterval(() => {
+  try { roomService.cleanup(); } catch (err) { logger.error('cleanup failed', err); }
+}, 60_000);
+const timeoutInterval = setInterval(() => {
+  try { roomService.checkTimeouts(io); } catch (err) { logger.error('checkTimeouts failed', err); }
+}, 500);
 
 server.listen(config.port, config.host, () => {
-  logger.info(`Chess Online listening on http://${config.host}:${config.port}`);
+  logger.info(`Games Online listening on http://${config.host}:${config.port}`);
 });
 
 let shuttingDown = false;

@@ -4,6 +4,15 @@ const rateLimit = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
 const { getEngine } = require('../games');
+const config = require('../config');
+
+function clientIp(socket) {
+  if (config.trustProxy) {
+    const xff = socket.handshake && socket.handshake.headers && socket.handshake.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff) return xff.split(',')[0].trim();
+  }
+  return (socket.handshake && socket.handshake.address) || null;
+}
 
 function sendErr(ack, err) {
   if (typeof ack === 'function') ack({ ok: false, error: err.message, code: err.code || 'ERROR' });
@@ -14,7 +23,7 @@ module.exports = function roomHandlers(io, socket) {
     try {
       rateLimit.check(socket, 'room:create');
       const { name, timeControl, gameType, vsBot } = validation.validateCreateRoom(payload);
-      const { room, token } = roomService.createRoom({ name, timeControl, gameType, vsBot, socketId: socket.id });      
+      const { room, token } = roomService.createRoom({ name, timeControl, gameType, vsBot, socketId: socket.id, ip: clientIp(socket) });
       socket.join(room.code);
       roomService.broadcastState(io, room);
       if (typeof ack === 'function') {
@@ -36,7 +45,7 @@ module.exports = function roomHandlers(io, socket) {
       io.to(room.code).emit('room:sysMessage', `${name} joined as ${seat}.`);
       
       roomService.broadcastState(io, room);
-      ack({ ok: true, roomCode: room.code, token, seat });
+      if (typeof ack === 'function') ack({ ok: true, roomCode: room.code, token, seat });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
       else { logger.error('room:join failed', err); sendErr(ack, { message: 'Internal error' }); }
@@ -54,7 +63,7 @@ module.exports = function roomHandlers(io, socket) {
       if (player) io.to(room.code).emit('room:sysMessage', `${player.name} reconnected.`);
 
       roomService.broadcastState(io, room);
-      ack({ ok: true, seat, snapshot: roomService.buildSnapshot(room, seat) });
+      if (typeof ack === 'function') ack({ ok: true, seat, snapshot: roomService.buildSnapshot(room, seat) });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
       else { logger.error('room:reconnect failed', err); sendErr(ack, { message: 'Internal error' }); }

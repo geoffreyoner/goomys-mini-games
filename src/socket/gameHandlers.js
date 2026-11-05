@@ -4,6 +4,9 @@ const rateLimit = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
 const { getEngine } = require('../games');
+const timer = require('../services/timerService');
+
+const QUICK_CHAT = new Set(['Nice move!', 'Good game!', 'Oops!', 'Good luck!', 'Thinking...', 'Wow!']);
 
 function sendErr(ack, err) {
   if (typeof ack === 'function') ack({ ok: false, error: err.message, code: err.code || 'ERROR' });
@@ -24,6 +27,7 @@ module.exports = function gameHandlers(io, socket) {
       
       const text = payload && typeof payload.text === 'string' ? payload.text.trim() : '';
       if (!text || text.length > 100) throw new AppError('INVALID_MSG', 'Message must be 1-100 chars');
+      if (!QUICK_CHAT.has(text)) throw new AppError('INVALID_MSG', 'Only quick chat messages are allowed');
 
       let name = 'Unknown';
       if (ctx.seat === 'white') name = ctx.room.players.white.name;
@@ -51,20 +55,20 @@ module.exports = function gameHandlers(io, socket) {
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       const { room, seat } = ctx;
       
-      if (room.gameType !== 'chess') return ack({ ok: true, moves: [] });
+      if (room.gameType !== 'chess') return typeof ack === 'function' && ack({ ok: true, moves: [] });
 
       if (!payload || typeof payload.from !== 'string' || !/^[a-h][1-8]$/.test(payload.from)) {
         throw new AppError('INVALID_SQUARE', 'Invalid square');
       }
       
       if (seat === 'spectator' || room.game.status !== 'active') {
-        return ack({ ok: true, moves: [] });
+        return typeof ack === 'function' && ack({ ok: true, moves: [] });
       }
       const myColor = seat === 'white' ? 'w' : 'b';
       if (room.game.chess.turn() !== myColor) return ack({ ok: true, moves: [] });
       
       const moves = room.game.chess.moves({ square: payload.from, verbose: true });
-      ack({ ok: true, moves: moves.map(m => m.to) });
+      if (typeof ack === 'function') ack({ ok: true, moves: moves.map(m => m.to) });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
       else sendErr(ack, { message: 'Internal error' });
@@ -81,24 +85,31 @@ module.exports = function gameHandlers(io, socket) {
       if (room.game.status !== 'active') throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
 
       const engine = getEngine(room.gameType);
-      
+
+      if (timer.isTimedOut(room)) {
+        engine.handleTimeout(room);
+        roomService.broadcastState(io, room);
+        throw new AppError('GAME_NOT_ACTIVE', 'Time is up');
+      }
+
+      if (!payload || typeof payload !== 'object') throw new AppError('INVALID_PAYLOAD', 'Invalid payload');
+
       let movePayload;
       if (room.gameType === 'chess') {
         movePayload = validation.validateMove(payload);
         if (room.moveRequests.has(movePayload.requestId)) {
-          return ack({ ok: true, duplicate: true });
-        }
-        room.moveRequests.set(movePayload.requestId, Date.now());
-        if (room.moveRequests.size > 200) {
-          const cutoff = Date.now() - 60_000;
-          for (const [k, t] of room.moveRequests) if (t < cutoff) room.moveRequests.delete(k);
+          return typeof ack === 'function' && ack({ ok: true, duplicate: true });
         }
       } else if (room.gameType === 'tictactoe') {
-        movePayload = { index: parseInt(payload.index, 10) };
-        if (isNaN(movePayload.index)) throw new AppError('INVALID_MOVE', 'Invalid index');
+        if (!Number.isInteger(payload.index) || payload.index < 0 || payload.index > 8) {
+          throw new AppError('INVALID_MOVE', 'Invalid index');
+        }
+        movePayload = { index: payload.index };
       } else if (room.gameType === 'connectfour') {
-        movePayload = { column: parseInt(payload.column, 10) };
-        if (isNaN(movePayload.column)) throw new AppError('INVALID_MOVE', 'Invalid column');
+        if (!Number.isInteger(payload.column) || payload.column < 0 || payload.column > 6) {
+          throw new AppError('INVALID_MOVE', 'Invalid column');
+        }
+        movePayload = { column: payload.column };
       } else {
         throw new AppError('INVALID_GAME', 'Unknown game type');
       }
@@ -113,6 +124,13 @@ module.exports = function gameHandlers(io, socket) {
         });
       }
 
+      if (movePayload.requestId) {
+        room.moveRequests.set(movePayload.requestId, Date.now());
+        if (room.moveRequests.size > 200) {
+          const cutoff = Date.now() - 60_000;
+          for (const [k, t] of room.moveRequests) if (t < cutoff) room.moveRequests.delete(k);
+        }
+      }
       roomService.broadcastState(io, room);
       if (typeof ack === 'function') ack({ ok: true });
 
@@ -232,9 +250,10 @@ module.exports = function gameHandlers(io, socket) {
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot rematch');
       if (ctx.room.botSeat) {
+        if (ctx.room.game.status !== 'finished') throw new AppError('GAME_NOT_FINISHED', 'Game is not finished');
         roomService.resetForRematch(ctx.room);
         roomService.broadcastState(io, ctx.room);
-        return ack({ ok: true, bothReady: true });
+        return typeof ack === 'function' && ack({ ok: true, bothReady: true });
       }
 
       const bothReady = roomService.voteRematch(ctx.room, ctx.seat);
@@ -254,7 +273,8 @@ module.exports = function gameHandlers(io, socket) {
       rateLimit.check(socket, 'default');
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
-      
+      if (ctx.seat !== 'white' && ctx.seat !== 'black') throw new AppError('FORBIDDEN', 'Only players may decline');
+
       roomService.declineRematch(ctx.room, ctx.seat);
       roomService.broadcastState(io, ctx.room);
       if (typeof ack === 'function') ack({ ok: true });

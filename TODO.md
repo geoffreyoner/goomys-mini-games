@@ -20,13 +20,15 @@
 - [x] Sound toggle button (mute/unmute)
 - [x] Smart Paste & Clear buttons for room codes
 - [x] Installable PWA (manifest + service worker)
+- [x] Connect Four
+- [x] Play vs bot
+- [x] Fix Tic-Tac-Toe clocks, bot promotion, abandonment broadcast, service worker caching
 
 ## Future Work
 
 ### Quality
-- [ ] Fix failing tests in `rooms.test.js` and `security.test.js` (they match error codes against `err.message`, but `AppError` keeps the code in `err.code`)
-- [ ] Add tests for the Tic-Tac-Toe engine and `gameHandlers` (move parsing, chat, rematch)
-- [ ] Add `scripts/generate-structure.js` or remove the `structure` npm script (the file is missing)
+- [ ] Add tests for `gameHandlers` (move parsing, chat, rematch) and the bot
+- [ ] Pin the `js-chess-engine` version (currently `^1.0.2`)
 
 ### Gameplay
 - [ ] Highlight the winning line in Tic-Tac-Toe

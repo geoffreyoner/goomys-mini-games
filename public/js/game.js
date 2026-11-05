@@ -8,6 +8,12 @@ import { sounds } from './audio.js';
 import { pieceSvg, PIECE_VALUE } from './pieces.js';
 import { setActiveTab, markChatUnread, setChatEnabled, showConnBanner, hideConnBanner } from './ui.js';
 
+function on(id, evt, fn) {
+  const el = document.getElementById(id);
+  if (!el) { console.warn(`[game] element #${id} not found`); return; }
+  el.addEventListener(evt, fn);
+}
+
 let current = null;
 let localOrientation = 'white';
 let lastStatus = null;
@@ -41,44 +47,45 @@ export function initGame() {
     leaveToLobby(false);
   });
 
-  document.getElementById('btn-resign').addEventListener('click', handleResign);
-  document.getElementById('btn-offer-draw').addEventListener('click', handleOfferDraw);
-  document.getElementById('btn-rematch').addEventListener('click', handleRematch);
-  document.getElementById('btn-export-pgn').addEventListener('click', handleExportPgn);
-  document.getElementById('btn-claim-draw').addEventListener('click', handleClaimDraw);
+  on('btn-resign', 'click', handleResign);
+  on('btn-offer-draw', 'click', handleOfferDraw);
+  on('btn-rematch', 'click', handleRematch);
+  on('btn-export-pgn', 'click', handleExportPgn);
+  on('btn-claim-draw', 'click', handleClaimDraw);
   
-  document.getElementById('copy-code').addEventListener('click', () => {
+  on('copy-code', 'click', () => {
     if (current) copyText(current.roomCode);
   });
-  document.getElementById('copy-link').addEventListener('click', () => {
+  on('copy-link', 'click', () => {
     if (current) copyText(`${location.origin}/?room=${current.roomCode}`);
   });
-  document.getElementById('leave-room').addEventListener('click', async () => {
+  on('leave-room', 'click', async () => {
     if (!current) return;
-    const ok = await confirm('Leave room', 'Are you sure? If a game is active, you will forfeit.');
+    const isPlayer = current.mySeat === 'white' || current.mySeat === 'black';
+    const msg = isPlayer && current.game.status === 'active'
+      ? 'Are you sure? You will forfeit the active game.'
+      : 'Are you sure you want to leave this room?';
+    const ok = await confirm('Leave room', msg);
     if (!ok) return;
     socket.emit('room:leave', {}, () => {});
     leaveToLobby(true);
   });
 
-  document.getElementById('wc-copy').addEventListener('click', () => {
-    if (current) copyText(`${location.origin}/?room=${current.roomCode}`);
-  });
-  document.getElementById('wc-share').addEventListener('click', handleShareInvite);
+  on('wc-copy', 'click', handleShareInvite);
 
-  document.getElementById('result-close').addEventListener('click', () => {
+  on('result-close', 'click', () => {
     resultDismissed = true;
     document.getElementById('modal-result').hidden = true;
   });
-  document.getElementById('result-rematch').addEventListener('click', handleRematch);
-  document.getElementById('result-pgn').addEventListener('click', handleExportPgn);
+  on('result-rematch', 'click', handleRematch);
+  on('result-pgn', 'click', handleExportPgn);
 
-  document.getElementById('rematch-accept').addEventListener('click', () => {
+  on('rematch-accept', 'click', () => {
     document.getElementById('modal-rematch').hidden = true;
     handleRematch();
   });
 
-  document.getElementById('rematch-decline').addEventListener('click', () => {
+  on('rematch-decline', 'click', () => {
     document.getElementById('modal-rematch').hidden = true;
     getSocket().emit('game:declineRematch', {});
   });
@@ -86,7 +93,7 @@ export function initGame() {
   document.querySelectorAll('.quick-chat-grid button').forEach(btn => {
     btn.addEventListener('click', () => {
       if (!current) { toast('Join a room first', 'warning', 1500); return; }
-      if (current.players.white?.name === 'Computer' || current.players.black?.name === 'Computer') return;
+      if (current.vsBot) return;
       const text = btn.dataset.msg;
       if (!text) return;
       getSocket().emit('room:chat', { text }, (res) => {
@@ -219,6 +226,7 @@ function onStateUpdate(snapshot) {
     }
   }
 
+  snapshot._receivedAt = Date.now(); // clock math must use the client's own time, not the server's timestamps
   current = snapshot;
   localOrientation = getOrientation();
   showGame();
@@ -576,7 +584,7 @@ function setBar(barId, player, color) {
   
   if (player) {
     let displayName = player.name;
-    if (player.name === 'Computer') displayName = 'Computer (Goomys)';
+    if (current.vsBot && color === 'black') displayName = 'Computer (Goomys)';
     nameEl.textContent = displayName;
   } else {
     nameEl.textContent = '—';
@@ -698,7 +706,7 @@ function describeResult(result, s) {
 function updateControls() {
   if (!current) return;
   const isPlayer = current.mySeat === 'white' || current.mySeat === 'black';
-  const isVsBot = current.players.white?.name === 'Computer' || current.players.black?.name === 'Computer';
+  const isVsBot = !!current.vsBot;
   const active = current.game.status === 'active';
   const finished = current.game.status === 'finished';
   const btnResign = document.getElementById('btn-resign');

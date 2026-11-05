@@ -65,20 +65,42 @@ socket.on('online:count', (count) => {
   prevCount = count;
 });
 
-initLobby();
-initBoard();
-initDialogs();
-initHistory();
-initTabs();
-initGame();
-
-const params = new URLSearchParams(location.search);
-if (params.has('room')) {
-  const code = (params.get('room') || '').toUpperCase().slice(0, 5);
-  const input = document.getElementById('join-code');
-  if (input) input.value = code;
+function safeInit(name, fn) {
+  try { fn(); } catch (err) { console.error(`[init] ${name} failed:`, err); }
 }
 
-let hasSaved = false;
-try { hasSaved = !!sessionStorage.getItem('reconnect'); } catch (_) {}
-if (!hasSaved) showLobby();
+safeInit('lobby', initLobby);
+safeInit('board', initBoard);
+safeInit('dialogs', initDialogs);
+safeInit('history', initHistory);
+safeInit('tabs', initTabs);
+safeInit('game', initGame);
+
+const params = new URLSearchParams(location.search);
+const urlRoom = params.has('room')
+  ? (params.get('room') || '').trim().toUpperCase().slice(0, 5)
+  : '';
+
+let saved = null;
+try { saved = JSON.parse(sessionStorage.getItem('reconnect') || 'null'); } catch (_) {}
+
+if (saved && urlRoom && saved.roomCode !== urlRoom) {
+  try { sessionStorage.removeItem('reconnect'); } catch (_) {}
+  saved = null;
+}
+
+if (urlRoom) {
+  const input = document.getElementById('join-code');
+  if (input) input.value = urlRoom;
+}
+
+if (!saved) {
+  showLobby();
+  if (urlRoom) {
+    const nameInput = document.getElementById('join-name');
+    if (nameInput) {
+      if (!nameInput.value) nameInput.focus();
+      nameInput.scrollIntoView({ block: 'center' });
+    }
+  }
+}

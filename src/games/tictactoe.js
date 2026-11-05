@@ -1,3 +1,5 @@
+const timer = require('../services/timerService');
+
 function create() {
   return {
     status: 'waiting',
@@ -21,17 +23,15 @@ function start(room) {
   room.clocks.activeSince = null;
   room.clocks.activeColor = null;
   room.rematchVotes = { white: false, black: false };
-  
-  if (room.timeControl.initial > 0) {
-    room.clocks.activeColor = 'w';
-    room.clocks.activeSince = Date.now();
-  }
+  timer.startClock(room, 'w');
 }
 
 function endGame(room, { winner, reason }) {
   if (room.game.status === 'finished') return false;
+  timer.commitElapsed(room);
   room.game.status = 'finished';
   room.game.result = { winner, reason };
+  room.game.drawOffer = null;
   room.game.version++;
   return true;
 }
@@ -41,12 +41,19 @@ function applyMove(room, seat, { index }) {
   
   const mySymbol = seat === 'white' ? 'X' : 'O';
   if (room.game.turn !== mySymbol) throw new Error('NOT_YOUR_TURN');
-  if (index < 0 || index > 8 || room.game.board[index] !== null) throw new Error('ILLEGAL_MOVE');
+  if (!Number.isInteger(index) || index < 0 || index > 8 || room.game.board[index] !== null) {
+    throw new Error('ILLEGAL_MOVE');
+  }
+
+  const myColor = seat === 'white' ? 'w' : 'b';
+  timer.commitElapsed(room);
+  timer.applyIncrement(room, myColor);
 
   room.game.board[index] = mySymbol;
   room.game.lastMove = { index, player: seat };
   room.game.history.push({ index, player: seat, symbol: mySymbol });
   room.game.turn = mySymbol === 'X' ? 'O' : 'X';
+  room.game.drawOffer = null;
   room.game.version++;
 
   const winPatterns = [
@@ -69,6 +76,8 @@ function applyMove(room, seat, { index }) {
     endGame(room, { winner: winner === 'X' ? 'w' : 'b', reason: 'line' });
   } else if (room.game.board.every(cell => cell !== null)) {
     endGame(room, { winner: null, reason: 'draw' });
+  } else {
+    timer.startClock(room, myColor === 'w' ? 'b' : 'w');
   }
 }
 

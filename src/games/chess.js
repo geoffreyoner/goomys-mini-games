@@ -28,7 +28,6 @@ function start(room) {
 
 function endGame(room, { winner, reason }) {
   if (room.game.status === 'finished') return false;
-  const timer = require('../services/timerService');
   timer.commitElapsed(room);
   room.game.status = 'finished';
   room.game.result = { winner, reason };

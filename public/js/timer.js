@@ -36,7 +36,8 @@ function tick() {
 
   if (clocks.activeSince && clocks.activeColor) {
     activeColor = clocks.activeColor;
-    const elapsed = Date.now() - clocks.activeSince;
+    // Server already subtracted time elapsed up to send time; only count time since we received it.
+    const elapsed = Math.max(0, Date.now() - (s._receivedAt ?? Date.now()));
     if (activeColor === 'w') white = Math.max(0, white - elapsed);
     else black = Math.max(0, black - elapsed);
   }

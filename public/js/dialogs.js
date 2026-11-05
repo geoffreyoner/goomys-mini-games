@@ -1,14 +1,19 @@
 import { getSocket } from './socket.js';
 import { toast, copyText, confirm } from './utils.js';
 
+function on(id, evt, fn) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(evt, fn);
+}
+
 export function initDialogs() {
-  document.getElementById('draw-accept').addEventListener('click', () => {
+  on('draw-accept', 'click', () => {
     document.getElementById('modal-draw').hidden = true;
     getSocket().emit('game:respondDraw', { accept: true }, (res) => {
       if (!res || !res.ok) toast((res && res.error) || 'Failed', 'error');
     });
   });
-  document.getElementById('draw-decline').addEventListener('click', () => {
+  on('draw-decline', 'click', () => {
     document.getElementById('modal-draw').hidden = true;
     getSocket().emit('game:respondDraw', { accept: false }, () => {});
   });

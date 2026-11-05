@@ -5,6 +5,9 @@ const { generateRoomCode, generateToken, hashToken } = require('./tokenService')
 const timer = require('./timerService');
 const { getEngine } = require('../games');
 
+let ioRef = null;
+function setIo(io) { ioRef = io; }
+
 const rooms = new Map();
 const socketToRoom = new Map();
 const tokenInfo = new Map();
@@ -17,9 +20,14 @@ function generateUniqueCode() {
   throw new AppError('CODE_GEN_FAILED', 'Could not generate unique room code');
 }
 
-function createRoom({ name, timeControl, gameType = 'chess', vsBot = false, socketId }) {
-  console.log(`[RoomService] Creating room. gameType: ${gameType}, vsBot: ${vsBot}`); // TAMBAHKAN INI
-  
+function createRoom({ name, timeControl, gameType = 'chess', vsBot = false, socketId, ip = null }) {
+  if (socketToRoom.has(socketId)) throw new AppError('ALREADY_IN_ROOM', 'Already in a room');
+  if (rooms.size >= config.maxRooms) throw new AppError('SERVER_FULL', 'Server is busy. Please try again later.');
+  if (ip) {
+    let mine = 0;
+    for (const r of rooms.values()) if (r.creatorIp === ip) mine++;
+    if (mine >= config.maxRoomsPerIp) throw new AppError('TOO_MANY_ROOMS', 'Too many open rooms from your network.');
+  }
   const code = generateUniqueCode();
   const token = generateToken();
   const tokenHash = hashToken(token);
@@ -29,6 +37,7 @@ function createRoom({ name, timeControl, gameType = 'chess', vsBot = false, sock
     code,
     gameType,
     createdAt: Date.now(),
+    creatorIp: ip,
     lastActivity: Date.now(),
     players: {
       white: { name, tokenHash, socketId, connected: true },
@@ -50,7 +59,6 @@ function createRoom({ name, timeControl, gameType = 'chess', vsBot = false, sock
   };
 
   if (vsBot) {
-    console.log('[RoomService] Bot detected! Initializing bot seat...'); // TAMBAHKAN INI
     room.botSeat = 'black';
     room.players.black = { name: 'Computer', tokenHash: 'bot-hash', socketId: null, connected: true };
     engine.start(room);
@@ -141,11 +149,13 @@ function removeSocket(socketId) {
         room.disconnectTimers[seat] = setTimeout(() => {
           if (room.game.status === 'active' && !room.players[seat].connected) {
             const engine = getEngine(room.gameType);
-            engine.endGame(room, {
+            const ended = engine.endGame(room, {
               winner: seat === 'white' ? 'b' : 'w',
               reason: 'abandonment'
             });
+            if (ended && ioRef) broadcastState(ioRef, room);
           }
+          delete room.disconnectTimers[seat];
         }, config.roomGraceMs);
       }
       return { room, seat };
@@ -186,6 +196,7 @@ function buildSnapshot(room, seat) {
   return {
     roomCode: room.code,
     gameType: room.gameType,
+    vsBot: !!room.botSeat,
     version: room.game.version,
     mySeat: seat,
     players: {
@@ -239,7 +250,13 @@ function declineRematch(room, seat) {
   room.game.version++;
 }
 
+function clearDisconnectTimers(room) {
+  for (const t of Object.values(room.disconnectTimers)) clearTimeout(t);
+  room.disconnectTimers = {};
+}
+
 function resetForRematch(room) {
+  clearDisconnectTimers(room);
   if (room.botSeat) {
     const engine = getEngine(room.gameType);
     engine.start(room);
@@ -283,11 +300,15 @@ function cleanup() {
 
 function checkTimeouts(io) {
   for (const room of rooms.values()) {
-    if (room.game.status !== 'active') continue;
-    if (timer.isTimedOut(room)) {
-      const engine = getEngine(room.gameType);
-      const ended = engine.handleTimeout(room);
-      if (ended) broadcastState(io, room);
+    try {
+      if (room.game.status !== 'active') continue;
+      if (timer.isTimedOut(room)) {
+        const engine = getEngine(room.gameType);
+        const ended = engine.handleTimeout(room);
+        if (ended) broadcastState(io, room);
+      }
+    } catch (err) {
+      logger.error(`checkTimeouts failed for room ${room.code}`, err);
     }
   }
 }
@@ -300,7 +321,7 @@ function _resetForTests() {
 function _getRoom(code) { return rooms.get(code); }
 
 module.exports = {
-  createRoom, joinRoom, reconnect, removeSocket, removeFromRoom,
+  setIo, createRoom, joinRoom, reconnect, removeSocket, removeFromRoom,
   getContext, buildSnapshot, broadcastState,
   voteRematch, declineRematch, resetForRematch, cleanup, checkTimeouts,
   _resetForTests, _getRoom

@@ -2,6 +2,7 @@ const { AppError } = require('../utils/errors');
 const config = require('../config');
 
 const MAX_NAME = 20;
+const RESERVED_NAME = 'computer';
 const NAME_RE = /^[\p{L}\p{N} _.\-']+$/u;
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{5}$/;
 const SQUARE_RE = /^[a-h][1-8]$/;
@@ -15,6 +16,9 @@ function validateName(name) {
   }
   if (!NAME_RE.test(trimmed)) {
     throw new AppError('INVALID_NAME', 'Name contains invalid characters');
+  }
+  if (trimmed.toLowerCase() === RESERVED_NAME) {
+    throw new AppError('INVALID_NAME', 'That name is reserved');
   }
   return trimmed;
 }
@@ -79,7 +83,7 @@ function validateMove(payload) {
   if (typeof payload.to !== 'string' || !SQUARE_RE.test(payload.to)) {
     throw new AppError('INVALID_MOVE', 'Invalid to-square');
   }
-  if (payload.promotion != null && !PROMO_RE.test(payload.promotion)) {
+  if (payload.promotion != null && (typeof payload.promotion !== 'string' || !PROMO_RE.test(payload.promotion))) {
     throw new AppError('INVALID_MOVE', 'Invalid promotion piece');
   }
   if (typeof payload.requestId !== 'string' || payload.requestId.length < 4 || payload.requestId.length > 64) {

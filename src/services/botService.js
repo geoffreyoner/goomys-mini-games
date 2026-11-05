@@ -1,4 +1,5 @@
 const { Game: ChessGame } = require('js-chess-engine');
+const { getEngine } = require('../games');
 
 function getTicTacToeMove(board, botSymbol) {
   let bestScore = -Infinity;
@@ -104,24 +105,28 @@ function checkC4Win(board, row, col, sym) {
 function makeMove(io, room) {
   if (room.game.status !== 'active' || !room.botSeat) return;
   
-  const botColor = room.botSeat === 'white' ? 'w' : 'b';
-  const botTurn = room.gameType === 'chess' ? room.game.chess.turn() : 
-                  room.gameType === 'tictactoe' ? room.game.turn : 
-                  room.game.turn;
+  const TOKENS = {
+    chess:       { white: 'w', black: 'b' },
+    tictactoe:   { white: 'X', black: 'O' },
+    connectfour: { white: 'R', black: 'Y' }
+  };
+  const botToken = TOKENS[room.gameType][room.botSeat];
+  const currentTurn = room.gameType === 'chess' ? room.game.chess.turn() : room.game.turn;
 
-  if (botTurn !== botColor) return;
+  if (currentTurn !== botToken) return;
 
-  const engine = require('../games/' + room.gameType);
+  const engine = getEngine(room.gameType);
+  const gameRef = room.game; // a rematch swaps room.game; a stale timer must not touch the new game
 
   setTimeout(() => {
-    if (room.game.status !== 'active') return;
+    if (room.game !== gameRef || room.game.status !== 'active') return;
     try {
       if (room.gameType === 'chess') {
         const game = new ChessGame(room.game.chess.fen());
         const aiMove = game.aiMove(2);
         const from = Object.keys(aiMove)[0].toLowerCase();
         const to = aiMove[Object.keys(aiMove)[0]].toLowerCase();
-        engine.applyMove(room, room.botSeat, { from, to });
+        engine.applyMove(room, room.botSeat, { from, to, promotion: 'q' });
       } else if (room.gameType === 'tictactoe') {
         const symbol = room.botSeat === 'white' ? 'X' : 'O';
         const index = getTicTacToeMove(room.game.board, symbol);
@@ -135,6 +140,18 @@ function makeMove(io, room) {
       require('./roomService').broadcastState(io, room);
     } catch (e) {
       console.error('Bot failed to move:', e);
+      try {
+        if (room.gameType === 'chess' && room.game === gameRef && room.game.status === 'active') {
+          const legal = room.game.chess.moves({ verbose: true });
+          if (legal.length) {
+            const m = legal[Math.floor(Math.random() * legal.length)];
+            engine.applyMove(room, room.botSeat, { from: m.from, to: m.to, promotion: 'q' });
+            require('./roomService').broadcastState(io, room);
+          }
+        }
+      } catch (e2) {
+        console.error('Bot fallback failed:', e2);
+      }
     }
   }, 1000);
 }

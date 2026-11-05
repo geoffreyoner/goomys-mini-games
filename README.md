@@ -1,10 +1,11 @@
-# Chess Online
+# Games Online
 
-Platform game online multiplayer (saat ini **Catur** dan **Tic-Tac-Toe**), mobile-first, dengan server sebagai satu-satunya sumber kebenaran (authoritative). Dibangun dengan Node.js, Express, Socket.IO, dan chess.js. Tanpa framework frontend, tanpa build step, tanpa database.
+Platform game online multiplayer (saat ini **Catur**, **Tic-Tac-Toe**, dan **Connect Four**), mobile-first. Dibangun dengan Node.js, Express, Socket.IO, dan chess.js.
 
 ## Fitur
 
-- Dua game dalam satu platform: **Catur** dan **Tic-Tac-Toe**, dipilih saat membuat room.
+- Tiga game dalam satu platform: **Catur**, **Tic-Tac-Toe**, dan **Connect Four**, dipilih saat membuat room.
+- Bisa bermain melawan komputer (bot) di semua game.
 - Dua pemain per room (Putih/X dan Hitam/O), maksimal dua penonton.
 - Room privat dengan kode 5 karakter (crypto-random).
 - Validasi langkah, hasil akhir, dan jam sepenuhnya di server.
@@ -30,8 +31,8 @@ Platform game online multiplayer (saat ini **Catur** dan **Tic-Tac-Toe**), mobil
 1. Clone repository:
 
    ```bash
-   git clone https://github.com/geoffreyoner/chess-online.git
-   cd chess-online
+   git clone https://github.com/geoffreyoner/goomys-mini-games.git
+   cd goomys-mini-games
    ```
 
 2. Install dependensi:
@@ -58,6 +59,8 @@ cp .env.example .env
 
 Lalu edit isinya, misalnya `PORT=8080`. Daftar variabel lengkap ada di `.env.example`.
 
+> **Penting jika memakai tunnel/reverse proxy** (Cloudflare, nginx): set `TRUST_PROXY=true` agar batas jumlah room per IP (`MAX_ROOMS_PER_IP`) membaca IP asli dari `X-Forwarded-For`. Tanpa ini, semua pemain terlihat berasal dari satu IP (alamat proxy) dan akan berbagi satu kuota. Jangan aktifkan jika server diakses langsung tanpa proxy, karena header itu bisa dipalsukan.
+
 ## Instalasi Khusus Android (Termux)
 
 Untuk menjalankan server langsung dari HP Android:
@@ -65,8 +68,8 @@ Untuk menjalankan server langsung dari HP Android:
 ```bash
 pkg update && pkg upgrade
 pkg install nodejs-lts git
-git clone https://github.com/geoffreyoner/chess-online.git
-cd chess-online
+git clone https://github.com/geoffreyoner/goomys-mini-games.git
+cd goomys-mini-games
 npm install
 npm start
 ```
@@ -112,6 +115,7 @@ src/
     index.js           getEngine(gameType)
     chess.js           Aturan catur (chess.js)
     tictactoe.js       Aturan Tic-Tac-Toe
+    connectfour.js     Aturan Connect Four
   services/          roomService, timerService, tokenService
   socket/            roomHandlers (room:*) dan gameHandlers (game:*, chat)
   middleware/        Validasi payload dan rate limiting
@@ -120,13 +124,13 @@ public/              Frontend (ES modules vanilla JS), CSS, PWA
 tests/               Automated test
 ```
 
-Server menyimpan `gameType` di tiap room dan memilih engine dari situ. Payload `game:move` divalidasi sesuai jenis game: catur memakai `{ from, to, promotion?, requestId }`, Tic-Tac-Toe memakai `{ index, requestId? }`.
+Server menyimpan `gameType` di tiap room dan memilih engine dari situ. Payload `game:move` divalidasi sesuai jenis game: catur memakai `{ from, to, promotion?, requestId }`, Tic-Tac-Toe memakai `{ index }`, dan Connect Four memakai `{ column }`.
 
 ## Menambah Game Baru
 
 1. Buat engine di `src/games/<nama>.js` yang mengekspor `create`, `start`, `endGame`, `applyMove`, `resign`, `offerDraw`, `respondDraw`, `claimDraw`, `canClaimDraw`, dan `handleTimeout`.
 2. Daftarkan di `src/games/index.js`.
-3. Tambahkan nama game ke daftar yang diizinkan di `src/middleware/validation.js` dan `src/services/roomService.js` (`SUPPORTED_GAMES`).
+3. Tambahkan nama game ke daftar yang diizinkan di `validateCreateRoom` pada `src/middleware/validation.js`.
 4. Tambahkan parser payload langkahnya di `MOVE_PARSERS` pada `src/socket/gameHandlers.js`, dan bentuk snapshot-nya di `buildGameView` pada `roomService.js`.
 5. Tambahkan tombol di lobby dan rendering papannya di frontend (`public/js/game.js`).
 
@@ -143,13 +147,13 @@ npm test
 - State disimpan di memori proses. Restart server menghapus semua room yang sedang aktif.
 - Tidak kompatibel dengan multi-instance tanpa shared state (misalnya Redis).
 - Klaim threefold repetition dan fifty-move rule dilakukan manual oleh pemain, bukan otomatis.
-- Quick Chat hanya mendukung pesan singkat (maksimal 100 karakter, dibatasi 15 pesan per menit per koneksi).
+- Quick Chat hanya menerima pesan preset (divalidasi server), dibatasi 15 pesan per menit per koneksi.
+
+<div align="center">
 
 ## Lisensi
 
 Didistribusikan di bawah [MIT License](LICENSE).
-
-<div align="center">
 
 Dibuat dengan ❤️ oleh Goomys
 
